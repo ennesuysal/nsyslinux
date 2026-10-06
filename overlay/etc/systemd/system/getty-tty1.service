@@ -1,6 +1,8 @@
 [Unit]
 Description=tty1 console login
 DefaultDependencies=no
+# Writes to disk; on a disk install / is read-only until diskler.service is done
+After=diskler.service
 
 [Service]
 ExecStart=-/sbin/getty 38400 -

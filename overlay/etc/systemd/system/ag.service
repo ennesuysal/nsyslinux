@@ -1,6 +1,8 @@
 [Unit]
 Description=Network (eth0, DHCP)
 DefaultDependencies=no
+# Writes to disk; on a disk install / is read-only until diskler.service is done
+After=diskler.service
 
 [Service]
 Type=oneshot

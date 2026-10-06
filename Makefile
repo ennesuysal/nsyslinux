@@ -55,6 +55,7 @@ CACERTS  ?= /etc/ssl/certs/ca-certificates.crt
 # ---- Disk installer tools taken from the host (BIOS/MBR, see nsys-install) -----
 SFDISK      := $(shell command -v sfdisk)
 MKE2FS      := $(shell command -v mke2fs)
+E2FSCK      := $(shell command -v e2fsck)
 GRUBINSTALL := $(shell command -v grub-install)
 GRUBLIB     ?= /usr/lib/grub/i386-pc
 
@@ -94,7 +95,7 @@ help:
 > @echo "make systemd     -> copy the host's systemd into rootfs with its libraries"
 > @echo "make iptables    -> copy the host's iptables (nf_tables) into rootfs with its extensions"
 > @echo "make docker      -> download Docker's static binaries, install them into rootfs"
-> @echo "make installer   -> copy the host's sfdisk, mke2fs and grub-install into rootfs (for nsys-install)"
+> @echo "make installer   -> copy the host's sfdisk, mke2fs, e2fsck and grub-install into rootfs"
 > @echo "make run         -> boot the ISO in QEMU (ssh -p 2222 root@localhost)"
 > @echo "make run-install -> boot the ISO in QEMU with an empty $(DISK) attached, to test the installer"
 > @echo "make run-disk    -> boot the system installed on $(DISK)"
@@ -201,11 +202,13 @@ docker: | $(DKDIR)
 # ---- Disk installer tools (from the host) --------------------------------------
 # BusyBox's fdisk is interactive only and its mke2fs can't do ext4, so the host's are used.
 # mke2fs.conf comes along so the ext4 features match what the host's GRUB can read.
+# e2fsck is BusyBox fsck's fsck.ext* helper, used by nsys-mount at boot on disk installs.
 installer:
-> @test -n "$(SFDISK)" -a -n "$(MKE2FS)" -a -n "$(GRUBINSTALL)" || \
-    { echo "sfdisk, mke2fs or grub-install not found (apt install fdisk e2fsprogs grub2-common)"; exit 1; }
+> @test -n "$(SFDISK)" -a -n "$(MKE2FS)" -a -n "$(E2FSCK)" -a -n "$(GRUBINSTALL)" || \
+    { echo "sfdisk, mke2fs, e2fsck or grub-install not found (apt install fdisk e2fsprogs grub2-common)"; exit 1; }
 > @test -d $(GRUBLIB) || { echo "$(GRUBLIB) not found (apt install grub-pc-bin)"; exit 1; }
-> $(call copy_bin,$(SFDISK) $(MKE2FS) $(GRUBINSTALL))
+> $(call copy_bin,$(SFDISK) $(MKE2FS) $(E2FSCK) $(GRUBINSTALL))
+> for t in ext2 ext3 ext4; do ln -sfn e2fsck $(ROOTFS)$(dir $(E2FSCK))fsck.$$t; done
 > install -D -m 644 /etc/mke2fs.conf $(ROOTFS)/etc/mke2fs.conf
 > mkdir -p $(ROOTFS)$(GRUBLIB) && cp -a $(GRUBLIB)/. $(ROOTFS)$(GRUBLIB)/
 
@@ -214,12 +217,14 @@ skel:
 > mkdir -p $(addprefix $(ROOTFS)/,bin sbin usr/bin usr/sbin etc etc/dropbear proc sys dev run tmp root var/log)
 > test -e $(ROOTFS)/dev/console || mknod -m 600 $(ROOTFS)/dev/console c 5 1
 > ln -sfn ../run $(ROOTFS)/var/run
+# e2fsck and mount look here to see what is mounted (e2fsck: that / is read-only during the boot fsck)
+> ln -sfn ../proc/self/mounts $(ROOTFS)/etc/mtab
 
 overlay:
 > @test -d $(OVERLAY) || { echo "ERROR: $(OVERLAY)/ missing. Create it with ./overlay-olustur.sh."; exit 1; }
 > cp -a $(OVERLAY)/. $(ROOTFS)/
 # Exec bit gets lost on Windows/OneDrive checkouts; without it udhcpc can't configure the IP
-> chmod 755 $(ROOTFS)/usr/share/udhcpc/default.script $(ROOTFS)/usr/sbin/nsys-install
+> chmod 755 $(ROOTFS)/usr/share/udhcpc/default.script $(ROOTFS)/usr/sbin/nsys-install $(ROOTFS)/usr/sbin/nsys-mount
 
 # Builds rootfs if it doesn't exist or if overlay/ has changed
 $(STAMP): $(OVERLAY_FILES)

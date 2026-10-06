@@ -2,7 +2,7 @@
 Description=Docker daemon
 DefaultDependencies=no
 Wants=ag.service
-After=ag.service
+After=ag.service diskler.service
 
 [Service]
 Environment=PATH=/sbin:/bin:/usr/sbin:/usr/bin

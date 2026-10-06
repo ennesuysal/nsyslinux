@@ -81,6 +81,8 @@ part=${part}1
 
 # Our own disk id, so the kernel can find the root partition as PARTUUID=<id>-01 without an initramfs
 id=$(od -An -N4 -tx4 /dev/urandom | tr -d ' \n')
+# and our own file system UUID for /etc/fstab (BusyBox mount and e2fsck understand UUID=, not PARTUUID=)
+fsuuid=$(cat /proc/sys/kernel/random/uuid)
 
 echo
 echo "Partitioning /dev/$disk..."
@@ -95,7 +97,7 @@ while [ ! -b $part ]; do
 done
 
 echo "Formatting $part (ext4)..."
-mke2fs -F -q -t ext4 -L nsyslinux $part || fail "formatting failed"
+mke2fs -F -q -t ext4 -L nsyslinux -U $fsuuid $part || fail "formatting failed"
 mkdir -p $TARGET
 mount -t ext4 $part $TARGET || fail "cannot mount $part"
 
@@ -110,6 +112,16 @@ chmod 1777 $TARGET/tmp
 mknod -m 600 $TARGET/dev/console c 5 1
 mknod -m 666 $TARGET/dev/null c 1 3
 
+# Read by diskler.service (nsys-mount) at boot: fsck, remount / read-write, mount the rest
+cat > $TARGET/etc/fstab <<EOF
+# <file system>                            <mount point>  <type>  <options>               <dump>  <pass>
+UUID=$fsuuid  /              ext4    defaults                0       1
+tmpfs                                      /tmp           tmpfs   mode=1777,nosuid,nodev  0       0
+
+# Other disks: find the UUID with "blkid", then add a line like
+# UUID=<uuid>                              /data          ext4    defaults,nofail         0       2
+EOF
+
 # On a real disk pivot_root works, so Docker doesn't need the ramdisk fallback any more
 sed -i '/^# Root is the initramfs/d; /DOCKER_RAMDISK/d' $TARGET/etc/systemd/system/docker.service
 
@@ -117,7 +129,8 @@ echo "Installing GRUB..."
 grub-install --target=i386-pc --boot-directory=$TARGET/boot --locales= --fonts= --themes= /dev/$disk ||
     fail "grub-install failed"
 
-root="root=PARTUUID=$id-01 rw rootwait"
+# "ro": diskler.service checks / with fsck before remounting it read-write
+root="root=PARTUUID=$id-01 ro rootwait"
 cat > $TARGET/boot/grub/grub.cfg <<EOF
 set timeout=5
 menuentry "nsyslinux" {
