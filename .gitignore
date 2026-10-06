@@ -1,0 +1,6 @@
+/src/
+/rootfs/
+/iso/
+*.iso
+*.cpio.gz
+/.rootfs.stamp

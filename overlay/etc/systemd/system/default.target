@@ -1,0 +1,4 @@
+[Unit]
+Description=nsyslinux target
+Wants=getty-tty1.service merhaba.service acil-kabuk.service ag.service sshd.service
+AllowIsolate=yes

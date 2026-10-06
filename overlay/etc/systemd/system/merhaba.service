@@ -1,0 +1,7 @@
+[Unit]
+Description=Boot greeting
+DefaultDependencies=no
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c 'echo "systemd brought the system up!" > /dev/console'

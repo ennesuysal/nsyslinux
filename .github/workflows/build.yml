@@ -1,0 +1,80 @@
+name: Build ISO
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    # Pinned: systemd is copied from the host, so the runner image determines its version
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential bc bison flex libelf-dev libssl-dev \
+            wget xz-utils bzip2 cpio \
+            grub-common grub-pc-bin xorriso mtools
+
+      - name: Read kernel version
+        id: ver
+        run: echo "kver=$(sed -nE 's/^KVER[[:space:]]*\?=[[:space:]]*//p' Makefile)" >> "$GITHUB_OUTPUT"
+
+      # Kernel build is the slowest step; reuse vmlinuz while KVER and the config are unchanged
+      - name: Cache kernel image
+        id: kcache
+        uses: actions/cache@v6
+        with:
+          path: iso/boot/vmlinuz
+          key: vmlinuz-${{ steps.ver.outputs.kver }}-${{ hashFiles('config/kernel.config') }}
+
+      - name: Build kernel
+        if: steps.kcache.outputs.cache-hit != 'true'
+        run: make kernel
+
+      # Root is needed for mknod /dev/console in the skel step
+      - name: Build rootfs and ISO
+        run: sudo make iso
+
+      - name: Checksum
+        run: sha256sum nsyslinux.iso | tee nsyslinux.iso.sha256
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: nsyslinux-iso
+          path: |
+            nsyslinux.iso
+            nsyslinux.iso.sha256
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: nsyslinux-iso
+
+      - name: Name files after the tag
+        run: |
+          mv nsyslinux.iso "nsyslinux-${GITHUB_REF_NAME}.iso"
+          sha256sum "nsyslinux-${GITHUB_REF_NAME}.iso" > "nsyslinux-${GITHUB_REF_NAME}.iso.sha256"
+
+      - uses: softprops/action-gh-release@v3
+        with:
+          files: |
+            nsyslinux-${{ github.ref_name }}.iso
+            nsyslinux-${{ github.ref_name }}.iso.sha256
+          generate_release_notes: true

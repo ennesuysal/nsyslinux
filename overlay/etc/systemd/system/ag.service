@@ -1,0 +1,11 @@
+[Unit]
+Description=Network (eth0, DHCP)
+DefaultDependencies=no
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+Environment=PATH=/sbin:/bin:/usr/sbin:/usr/bin
+ExecStart=/bin/busybox ip link set lo up
+ExecStart=/bin/busybox ip link set eth0 up
+ExecStart=/bin/busybox udhcpc -i eth0 -n -q -t 10

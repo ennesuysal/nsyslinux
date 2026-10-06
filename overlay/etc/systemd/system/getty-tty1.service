@@ -1,0 +1,13 @@
+[Unit]
+Description=tty1 console login
+DefaultDependencies=no
+
+[Service]
+ExecStart=-/sbin/getty 38400 -
+StandardInput=tty
+StandardOutput=tty
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+Type=idle
+Restart=always

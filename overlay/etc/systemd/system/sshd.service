@@ -1,0 +1,10 @@
+[Unit]
+Description=Dropbear SSH server
+DefaultDependencies=no
+Wants=ag.service
+After=ag.service
+
+[Service]
+ExecStart=/usr/sbin/dropbear -F -E -R
+StandardError=append:/var/log/dropbear.log
+Restart=always

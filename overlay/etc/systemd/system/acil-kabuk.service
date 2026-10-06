@@ -1,0 +1,12 @@
+[Unit]
+Description=tty2 emergency shell
+DefaultDependencies=no
+
+[Service]
+ExecStart=/bin/sh
+StandardInput=tty
+StandardOutput=tty
+StandardError=tty
+TTYPath=/dev/tty2
+TTYReset=yes
+Restart=always
