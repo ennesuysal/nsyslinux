@@ -3,7 +3,9 @@ Description=tty2 emergency shell
 DefaultDependencies=no
 
 [Service]
-ExecStart=/bin/sh
+# Asks for the root password first; unlike getty/login it writes nothing to disk,
+# so it also works while / is still read-only (e.g. after a failed boot fsck)
+ExecStart=/sbin/sulogin
 StandardInput=tty
 StandardOutput=tty
 StandardError=tty

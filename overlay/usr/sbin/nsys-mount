@@ -16,7 +16,7 @@ if [ $((rc & 2)) -ne 0 ]; then
 fi
 if [ $rc -ge 4 ]; then
     echo "fsck could not repair everything (exit $rc), / stays read-only."
-    echo "Fix it from the emergency shell on tty2 (Alt+F2): fsck -A -y, then reboot -f"
+    echo "Fix it from the emergency shell on tty2 (Alt+F2, root password): fsck -A -y, then reboot -f"
     exit 1
 fi
 
