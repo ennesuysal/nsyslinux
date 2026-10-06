@@ -4,3 +4,4 @@
 *.iso
 *.cpio.gz
 /.rootfs.stamp
+*.qcow2

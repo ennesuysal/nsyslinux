@@ -1,0 +1,24 @@
+#!/bin/sh
+# Started by diskler.service when /etc/fstab exists (disk installs). The kernel mounts /
+# read-only ("ro" on the kernel command line), so every file system is checked here while
+# nothing writes to it; then / is made writable and the rest of /etc/fstab is mounted.
+# (systemd's fstab-generator can't be used: its mounts wait for udev device units.)
+
+# fsck.ext4 (the host's e2fsck) lives in /usr/sbin
+export PATH=/usr/sbin:/usr/bin:/sbin:/bin
+
+# fsck exit codes are bit flags: 1 = errors fixed, 2 = reboot needed, 4+ = errors left
+fsck -A -T -a
+rc=$?
+if [ $((rc & 2)) -ne 0 ]; then
+    echo "fsck repaired the root file system, rebooting..."
+    reboot -f
+fi
+if [ $rc -ge 4 ]; then
+    echo "fsck could not repair everything (exit $rc), / stays read-only."
+    echo "Fix it from the emergency shell on tty2 (Alt+F2): fsck -A -y, then reboot -f"
+    exit 1
+fi
+
+mount -o remount,rw / || exit 1
+mount -a

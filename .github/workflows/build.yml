@@ -23,16 +23,21 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             build-essential bc bison flex libelf-dev libssl-dev \
             wget xz-utils bzip2 cpio \
-            grub-common grub-pc-bin xorriso mtools
+            grub-common grub-pc-bin xorriso mtools \
+            iptables ca-certificates fdisk e2fsprogs grub2-common
 
-      - name: Read kernel version
+      - name: Read versions
         id: ver
-        run: echo "kver=$(sed -nE 's/^KVER[[:space:]]*\?=[[:space:]]*//p' Makefile)" >> "$GITHUB_OUTPUT"
+        run: |
+          for v in KVER BBVER DBVER DKVER; do
+            echo "${v,,}=$(sed -nE "s/^$v[[:space:]]*\?=[[:space:]]*//p" Makefile)" >> "$GITHUB_OUTPUT"
+          done
 
-      # Kernel build is the slowest step; reuse vmlinuz while KVER and the config are unchanged
-      - name: Cache kernel image
+      # Kernel build is the slowest step; reuse vmlinuz while KVER and the config are unchanged.
+      # Restore and save are split so a later failure (rootfs/ISO) doesn't throw away a fresh kernel.
+      - name: Restore kernel image
         id: kcache
-        uses: actions/cache@v6
+        uses: actions/cache/restore@v6
         with:
           path: iso/boot/vmlinuz
           key: vmlinuz-${{ steps.ver.outputs.kver }}-${{ hashFiles('config/kernel.config') }}
@@ -40,6 +45,44 @@ jobs:
       - name: Build kernel
         if: steps.kcache.outputs.cache-hit != 'true'
         run: make kernel
+
+      - name: Save kernel image
+        if: steps.kcache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: iso/boot/vmlinuz
+          key: ${{ steps.kcache.outputs.cache-primary-key }}
+
+      # Built BusyBox tree. A config change falls back to the previous tree via restore-keys,
+      # and kbuild then recompiles only the objects affected by the changed symbols.
+      - name: Cache BusyBox build
+        id: bbcache
+        uses: actions/cache@v6
+        with:
+          path: src/busybox-${{ steps.ver.outputs.bbver }}
+          key: busybox-${{ runner.os }}-${{ runner.arch }}-${{ steps.ver.outputs.bbver }}-${{ hashFiles('config/busybox.config') }}
+          restore-keys: busybox-${{ runner.os }}-${{ runner.arch }}-${{ steps.ver.outputs.bbver }}-
+
+      # On an exact hit the cached .config was generated from this very file (it's in the key),
+      # but checkout makes the file look newer and would trigger oldconfig + a full rebuild.
+      - name: Mark BusyBox config as up to date
+        if: steps.bbcache.outputs.cache-hit == 'true'
+        run: touch -d @0 config/busybox.config
+
+      # Built Dropbear tree. Keyed on the Makefile because the configure flags live there;
+      # no restore-keys since make won't rebuild an existing dropbear binary on flag changes.
+      - name: Cache Dropbear build
+        uses: actions/cache@v6
+        with:
+          path: src/dropbear-${{ steps.ver.outputs.dbver }}
+          key: dropbear-${{ runner.os }}-${{ runner.arch }}-${{ steps.ver.outputs.dbver }}-${{ hashFiles('Makefile') }}
+
+      # Docker's static tarball (~80 MB); only changes with DKVER
+      - name: Cache Docker binaries
+        uses: actions/cache@v6
+        with:
+          path: src/docker-${{ steps.ver.outputs.dkver }}
+          key: docker-${{ runner.arch }}-${{ steps.ver.outputs.dkver }}
 
       # Root is needed for mknod /dev/console in the skel step
       - name: Build rootfs and ISO

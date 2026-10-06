@@ -1,0 +1,13 @@
+[Unit]
+Description=Check and mount file systems (/etc/fstab)
+DefaultDependencies=no
+ConditionPathExists=/etc/fstab
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/nsys-mount
+# / is still read-only and there is no journald: fsck output goes to the console
+StandardOutput=tty
+StandardError=tty
+TTYPath=/dev/console

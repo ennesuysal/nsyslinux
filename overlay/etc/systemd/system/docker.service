@@ -1,0 +1,17 @@
+[Unit]
+Description=Docker daemon
+DefaultDependencies=no
+Wants=ag.service
+After=ag.service
+
+[Service]
+Environment=PATH=/sbin:/bin:/usr/sbin:/usr/bin
+# Root is the initramfs, where pivot_root fails; makes runc fall back to chroot (nsys-install drops this on disk installs)
+Environment=DOCKER_RAMDISK=true
+ExecStart=/usr/bin/dockerd
+StandardOutput=append:/var/log/docker.log
+StandardError=append:/var/log/docker.log
+Delegate=yes
+KillMode=process
+LimitNOFILE=infinity
+Restart=always

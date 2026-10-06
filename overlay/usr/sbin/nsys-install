@@ -1,0 +1,134 @@
+#!/bin/sh
+# nsyslinux installer. GRUB's "install" entry starts it as the first process (rdinit=),
+# straight from the initramfs, so / is still the untouched live system and gets copied as is.
+# BIOS/MBR only: one ext4 partition, GRUB (i386-pc) in the MBR.
+
+# Host tools (sfdisk, mke2fs, grub-install) live in /usr/sbin; they must win over BusyBox's mke2fs
+export PATH=/usr/sbin:/usr/bin:/sbin:/bin
+TARGET=/mnt
+
+mount -t devtmpfs devtmpfs /dev
+mount -t proc proc /proc
+mount -t sysfs sysfs /sys
+
+# PID 1 must never exit: on failure, drop to a shell
+fail() {
+    echo
+    echo "ERROR: $*"
+    echo "Type 'reboot -f' to restart."
+    exec /bin/sh
+}
+
+size_mb() { echo $(( $(cat /sys/block/$1/size) / 2048 )); }
+
+printf '\033c'
+echo "=== nsyslinux installer ==="
+echo
+# Give USB/NVMe disks a moment to show up
+sleep 2
+
+while :; do
+    disks=""
+    n=0
+    for d in /sys/block/*; do
+        name=${d##*/}
+        case $name in loop*|ram*|zram*|sr*|fd*|dm-*|md*) continue ;; esac
+        [ "$(cat $d/size)" -gt 0 ] || continue
+        n=$((n + 1))
+        disks="$disks $name"
+        printf '  %d) /dev/%-10s %8s MB  %s\n' $n $name $(size_mb $name) "$(cat $d/device/model 2>/dev/null)"
+    done
+    if [ $n -eq 0 ]; then
+        echo "No hard disk found. Either no disk is attached, or this kernel has no driver"
+        echo "for its controller. Storage controllers on this machine:"
+        echo
+        for d in /sys/bus/pci/devices/*; do
+            case $(cat $d/class) in 0x01*) ;; *) continue ;; esac  # PCI class 01 = mass storage
+            drv=$(readlink $d/driver)
+            drv=${drv##*/}
+            echo "  ${d##*/}  vendor $(cat $d/vendor) device $(cat $d/device)  driver: ${drv:-NONE}"
+        done
+        echo
+        printf 'Enter = rescan, s = shell, q = reboot: '
+        read a
+        case $a in s) exec /bin/sh ;; q) reboot -f ;; esac
+        continue
+    fi
+
+    echo
+    printf 'Disk to install to (1-%d, q = cancel and reboot): ' $n
+    read sel
+    [ "$sel" = q ] && reboot -f
+    case $sel in ''|*[!0-9]*) continue ;; esac
+    [ "$sel" -ge 1 ] && [ "$sel" -le $n ] || continue
+    set -- $disks
+    eval disk=\${$sel}
+
+    [ $(size_mb $disk) -ge 1024 ] || { echo "/dev/$disk is smaller than 1 GB."; echo; continue; }
+
+    echo
+    echo "ALL DATA ON /dev/$disk WILL BE ERASED."
+    printf "Type 'yes' to continue: "
+    read ok
+    [ "$ok" = yes ] && break
+    echo
+done
+
+# nvme0n1 -> nvme0n1p1, sda -> sda1
+part=/dev/$disk
+case $disk in *[0-9]) part=${part}p ;; esac
+part=${part}1
+
+# Our own disk id, so the kernel can find the root partition as PARTUUID=<id>-01 without an initramfs
+id=$(od -An -N4 -tx4 /dev/urandom | tr -d ' \n')
+
+echo
+echo "Partitioning /dev/$disk..."
+printf 'label: dos\nlabel-id: 0x%s\nstart=2048, type=83, bootable\n' $id |
+    sfdisk -q --wipe always --wipe-partitions always /dev/$disk || fail "partitioning failed"
+
+i=0
+while [ ! -b $part ]; do
+    i=$((i + 1))
+    [ $i -le 10 ] || fail "$part did not appear"
+    sleep 1
+done
+
+echo "Formatting $part (ext4)..."
+mke2fs -F -q -t ext4 -L nsyslinux $part || fail "formatting failed"
+mkdir -p $TARGET
+mount -t ext4 $part $TARGET || fail "cannot mount $part"
+
+echo "Copying the system..."
+for d in /*; do
+    case $d in
+        /proc|/sys|/dev|/run|/tmp|$TARGET) mkdir -p $TARGET$d ;;
+        *) cp -a $d $TARGET/ || fail "copying $d failed" ;;
+    esac
+done
+chmod 1777 $TARGET/tmp
+mknod -m 600 $TARGET/dev/console c 5 1
+mknod -m 666 $TARGET/dev/null c 1 3
+
+# On a real disk pivot_root works, so Docker doesn't need the ramdisk fallback any more
+sed -i '/^# Root is the initramfs/d; /DOCKER_RAMDISK/d' $TARGET/etc/systemd/system/docker.service
+
+echo "Installing GRUB..."
+grub-install --target=i386-pc --boot-directory=$TARGET/boot --locales= --fonts= --themes= /dev/$disk ||
+    fail "grub-install failed"
+
+root="root=PARTUUID=$id-01 rw rootwait"
+cat > $TARGET/boot/grub/grub.cfg <<EOF
+set timeout=5
+menuentry "nsyslinux" {
+    linux /boot/vmlinuz $root console=tty0 quiet systemd.show_status=1 init=/usr/lib/systemd/systemd
+}
+EOF
+
+sync
+umount $TARGET
+
+echo
+echo "Installation finished. Remove the installation media and press Enter to reboot."
+read _
+reboot -f
