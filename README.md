@@ -148,10 +148,13 @@ overlay/                 files copied into the root file system
 
 ## CI
 
-`.github/workflows/build.yml` builds the ISO on every push to `main`, on every pull request, and on
-manual runs, and uploads it as a workflow artifact. Pushing a `v*` tag also publishes the ISO and
-its SHA-256 checksum as a GitHub release. The kernel image, the BusyBox and Dropbear build trees,
-and the Docker binaries are cached, so a run without kernel changes skips the kernel build.
+`.github/workflows/build.yml` builds the ISO only when a `v*` tag is pushed, and publishes it with
+its SHA-256 checksum as a GitHub release.
+
+Pushes to `main` don't build an ISO. They build the kernel, BusyBox and Dropbear, download Docker,
+and save them as caches. A tag run can only use caches from `main` (not from earlier tags), so
+release builds reuse them and skip the kernel build. To get a fast release, push the tag after the
+`main` run for that commit has finished.
 
 ## Known limitations
 

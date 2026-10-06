@@ -1,10 +1,12 @@
 name: Build ISO
 
+# The ISO is built and released only for v* tags. Pushes to main just fill the build caches:
+# a tag run can restore caches from the default branch but not from other tags, so without
+# main every release would build the kernel from scratch.
 on:
   push:
     branches: [main]
     tags: ['v*']
-  pull_request:
   workflow_dispatch:
 
 permissions:
@@ -14,6 +16,8 @@ jobs:
   build:
     # Pinned: systemd is copied from the host, so the runner image determines its version
     runs-on: ubuntu-24.04
+    env:
+      RELEASE: ${{ startsWith(github.ref, 'refs/tags/v') }}
     steps:
       - uses: actions/checkout@v7
 
@@ -34,7 +38,7 @@ jobs:
           done
 
       # Kernel build is the slowest step; reuse vmlinuz while KVER and the config are unchanged.
-      # Restore and save are split so a later failure (rootfs/ISO) doesn't throw away a fresh kernel.
+      # Caches are saved only from main (see the top): one saved by a tag run is visible to that tag only.
       - name: Restore kernel image
         id: kcache
         uses: actions/cache/restore@v6
@@ -46,8 +50,9 @@ jobs:
         if: steps.kcache.outputs.cache-hit != 'true'
         run: make kernel
 
+      # Saved right away, so a later failure doesn't throw away a fresh kernel
       - name: Save kernel image
-        if: steps.kcache.outputs.cache-hit != 'true'
+        if: env.RELEASE != 'true' && steps.kcache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v6
         with:
           path: iso/boot/vmlinuz
@@ -55,9 +60,9 @@ jobs:
 
       # Built BusyBox tree. A config change falls back to the previous tree via restore-keys,
       # and kbuild then recompiles only the objects affected by the changed symbols.
-      - name: Cache BusyBox build
+      - name: Restore BusyBox build
         id: bbcache
-        uses: actions/cache@v6
+        uses: actions/cache/restore@v6
         with:
           path: src/busybox-${{ steps.ver.outputs.bbver }}
           key: busybox-${{ runner.os }}-${{ runner.arch }}-${{ steps.ver.outputs.bbver }}-${{ hashFiles('config/busybox.config') }}
@@ -71,27 +76,58 @@ jobs:
 
       # Built Dropbear tree. Keyed on the Makefile because the configure flags live there;
       # no restore-keys since make won't rebuild an existing dropbear binary on flag changes.
-      - name: Cache Dropbear build
-        uses: actions/cache@v6
+      - name: Restore Dropbear build
+        id: dbcache
+        uses: actions/cache/restore@v6
         with:
           path: src/dropbear-${{ steps.ver.outputs.dbver }}
           key: dropbear-${{ runner.os }}-${{ runner.arch }}-${{ steps.ver.outputs.dbver }}-${{ hashFiles('Makefile') }}
 
       # Docker's static tarball (~80 MB); only changes with DKVER
-      - name: Cache Docker binaries
-        uses: actions/cache@v6
+      - name: Restore Docker binaries
+        id: dkcache
+        uses: actions/cache/restore@v6
         with:
           path: src/docker-${{ steps.ver.outputs.dkver }}
           key: docker-${{ runner.arch }}-${{ steps.ver.outputs.dkver }}
 
-      # Root is needed for mknod /dev/console in the skel step
+      # main: build only what the caches hold, no ISO
+      - name: Build BusyBox, Dropbear, fetch Docker
+        if: env.RELEASE != 'true'
+        run: make busybox dropbear docker
+
+      - name: Save BusyBox build
+        if: env.RELEASE != 'true' && steps.bbcache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: src/busybox-${{ steps.ver.outputs.bbver }}
+          key: ${{ steps.bbcache.outputs.cache-primary-key }}
+
+      - name: Save Dropbear build
+        if: env.RELEASE != 'true' && steps.dbcache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: src/dropbear-${{ steps.ver.outputs.dbver }}
+          key: ${{ steps.dbcache.outputs.cache-primary-key }}
+
+      - name: Save Docker binaries
+        if: env.RELEASE != 'true' && steps.dkcache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: src/docker-${{ steps.ver.outputs.dkver }}
+          key: ${{ steps.dkcache.outputs.cache-primary-key }}
+
+      # v* tags only from here on. Root is needed for mknod /dev/console in the skel step
       - name: Build rootfs and ISO
+        if: env.RELEASE == 'true'
         run: sudo make iso
 
       - name: Checksum
+        if: env.RELEASE == 'true'
         run: sha256sum nsyslinux.iso | tee nsyslinux.iso.sha256
 
       - uses: actions/upload-artifact@v7
+        if: env.RELEASE == 'true'
         with:
           name: nsyslinux-iso
           path: |
