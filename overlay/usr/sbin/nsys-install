@@ -66,6 +66,19 @@ while :; do
 
     [ $(size_mb $disk) -ge 1024 ] || { echo "/dev/$disk is smaller than 1 GB."; echo; continue; }
 
+    while true; do
+        echo
+        printf "Root Password: "
+        read -s password
+        [ -n "$password" ] || { echo "Password cannot be empty."; continue; }
+        echo
+        printf "Confirm: "
+        read -s password2
+        echo
+        [ "$password" = "$password2" ] || { echo "Passwords do not match."; continue; }
+        break
+    done
+
     echo
     echo "ALL DATA ON /dev/$disk WILL BE ERASED."
     printf "Type 'yes' to continue: "
@@ -111,6 +124,10 @@ done
 chmod 1777 $TARGET/tmp
 mknod -m 600 $TARGET/dev/console c 5 1
 mknod -m 666 $TARGET/dev/null c 1 3
+
+cat > $TARGET/etc/passwd <<EOF
+    root:$(/bin/busybox mkpasswd -m sha512 $password):0:0:root:/root:/bin/sh
+EOF
 
 # Read by diskler.service (nsys-mount) at boot: fsck, remount / read-write, mount the rest
 cat > $TARGET/etc/fstab <<EOF
