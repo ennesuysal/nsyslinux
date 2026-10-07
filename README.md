@@ -63,14 +63,8 @@ The GRUB menu has two entries:
 - **nsyslinux**: the live system, running from RAM. Changes are lost on reboot.
 - **nsyslinux: install to hard disk**: the installer.
 
-Log in as `root`. The password hash is in `overlay/etc/passwd`. To set your own password, generate a
-hash with `openssl passwd -1` and put it there.
-
 tty2 (Alt+F2) has an emergency shell (`sulogin`). It asks for the root password too, but unlike
 the tty1 login it also works while `/` is still read-only, for example after a failed boot fsck.
-
-Anyone at the console can still edit the kernel command line in the GRUB menu (for example
-`init=/bin/sh`) and get a shell without a password; the GRUB menu has no password.
 
 ## Installing to a hard disk
 
